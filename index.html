@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Sokoban · BW</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #fff; color: #000;
+    font-family: -apple-system, 'Segoe UI', 'Noto Sans', sans-serif;
+    min-height: 100dvh;
+    display: flex; justify-content: center; align-items: center;
+    user-select: none; -webkit-user-select: none;
+  }
+  .game {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 16px; padding: 20px; width: 100%; max-width: 520px;
+  }
+  h1 {
+    font-size: 22px; font-weight: 700; letter-spacing: 4px;
+    border-bottom: 2px solid #000; padding-bottom: 8px;
+    width: 100%; text-align: center;
+  }
+  .hud {
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; font-size: 14px; font-weight: 600;
+  }
+  .hud span { min-width: 60px; }
+  .board-wrap { position: relative; width: 100%; display: flex; justify-content: center; }
+  canvas {
+    display: block; border: 2px solid #000; background: #fff;
+    touch-action: none; max-width: 100%; height: auto;
+  }
+  .controls { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+  .controls button {
+    background: #000; color: #fff; border: none; font-size: 13px;
+    font-weight: 600; padding: 8px 16px; cursor: pointer; transition: .15s;
+  }
+  .controls button:hover { background: #333; }
+  .controls button:active { background: #666; }
+  .dpad {
+    display: grid; grid-template: repeat(3,52px) / repeat(3,52px); gap: 3px; margin-top: 8px;
+  }
+  .dpad button {
+    background: #fff; color: #000; border: 2px solid #000; font-size: 22px;
+    font-weight: 700; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; transition: .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .dpad button:active { background: #000; color: #fff; }
+  .dpad .empty { visibility: hidden; border-color: transparent; }
+  .msg {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(255,255,255,.92);
+    opacity: 0; pointer-events: none; transition: opacity .35s; border: 2px solid #000;
+  }
+  .msg.show { opacity: 1; pointer-events: auto; }
+  .msg h2 { font-size: 28px; font-weight: 900; margin-bottom: 8px; }
+  .msg p { font-size: 14px; margin-bottom: 14px; }
+  .msg button {
+    background: #000; color: #fff; border: none; font-size: 15px;
+    font-weight: 700; padding: 10px 28px; cursor: pointer;
+  }
+  .msg button:hover { background: #333; }
+  .footer { font-size: 11px; color: #888; letter-spacing: 1px; margin-top: 4px; }
+  @media (max-width: 420px) {
+    h1 { font-size: 18px; }
+    .hud { font-size: 12px; }
+    .controls button { font-size: 12px; padding: 6px 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="game" id="app">
+  <h1>推 箱 子</h1>
+  <div class="hud">
+    <span>第 <b id="levelNum">1</b> 关</span>
+    <span>步数 <b id="moves">0</b></span>
+  </div>
+  <div class="board-wrap">
+    <canvas id="board"></canvas>
+    <div class="msg" id="msg">
+      <h2 id="msgTitle">✓</h2>
+      <p id="msgBody"></p>
+      <button id="msgBtn">继续</button>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="resetBtn">↺ 重来</button>
+    <button id="undoBtn">↰ 撤回</button>
+    <button id="prevBtn">◀ 上一关</button>
+    <button id="nextBtn">下一关 ▶</button>
+  </div>
+  <div class="dpad" id="dpad">
+    <button class="empty"></button><button data-d="u">▲</button><button class="empty"></button>
+    <button data-d="l">◀</button><button class="empty"></button><button data-d="r">▶</button>
+    <button class="empty"></button><button data-d="d">▼</button><button class="empty"></button>
+  </div>
+  <div class="footer">← → ↑ ↓ 或 WASD 移动</div>
+</div>
+<script>
+const LEVELS = [
+  //1
+  ["#####","#   #","# $ #","# . #","# @ #","#####"],
+  //2
+  ["#####","#   #","# $ #","#.@ #","#####"],
+  //3
+  ["  ####","###  #","# $  #","# .$ #","# .@ #","######"],
+  //4
+  ["  ####","  #  #","  # $ #","###  $#","# .  #","# .# #","# @ #","#####"],
+  //5
+  ["  #####","  #   #","  # $ #","### $ #","#   . #","# . . #","#  @  #","#######"],
+  //6
+  ["  #####","###   #","# $ $ #","# . . #","# . $ #","# . @ #","#######"],
+  //7
+  ["########","#      #","# $  $ #","# .  $ #","# .  . #","# .  @ #","########"],
+  //8
+  ["  ######","  #    #","### $  #","# $  $ #","# . .  #","# . @  #","########"],
+  //9
+  ["  ####","##  ##","#  $ #","# $$ #","# .  #","##.##"," # @#"," # .#"," ## #","  ## "],
+  //10
+  ["  #####","###   #","# $ $ #","# .$  #","# .  .#","# .  @#","#######"],
+  //11
+  ["  #####","  #   #","  # $ #####","### $ $  #","#   $ .  #","# . . $  #","# . . .  #","#  @     #","##########"],
+  //12
+  ["    ######","    #    #","    # $  #","  ### $  #","  #  $ $ #","### . . .#","#   . .  #","# $ .   @#","#   ######","#####"],
+];
+
+const CELL=48;
+const cx=document.getElementById('board');
+const ctx=cx.getContext('2d');
+let levelIdx=0,grid=[],boxes=[],player={r:0,c:0},moves=0,history=[],solved=false;
+
+function loadLevel(idx){
+  const raw=LEVELS[idx],rows=raw.length,cols=Math.max(...raw.map(r=>r.length));
+  grid=[];boxes=[];moves=0;history=[];solved=false;
+  for(let r=0;r<rows;r++){
+    const row=raw[r];grid[r]=[];
+    for(let c=0;c<cols;c++){
+      const ch=c<row.length?row[c]:' ';
+      grid[r][c]={wall:ch==='#',target:ch==='.'||ch==='+'||ch==='*'};
+      if(ch==='$'||ch==='*')boxes.push({r,c,onTarget:ch==='*'});
+      if(ch==='@'||ch==='+')player={r,c};
+    }
+  }
+  document.getElementById('levelNum').textContent=idx+1;
+  updateMoves();render();
+}
+
+const DIRS={u:[-1,0],d:[1,0],l:[0,-1],r:[0,1]};
+
+function tryMove(dr,dc){
+  if(solved)return;
+  const nr=player.r+dr,nc=player.c+dc;
+  if(nr<0||nr>=grid.length||nc<0||nc>=grid[0].length)return;
+  if(grid[nr][nc].wall)return;
+  const box=boxes.find(b=>b.r===nr&&b.c===nc);
+  if(box){
+    const br=nr+dr,bc=nc+dc;
+    if(br<0||br>=grid.length||bc<0||bc>=grid[0].length)return;
+    if(grid[br][bc].wall||boxes.some(b=>b.r===br&&b.c===bc))return;
+    history.push({boxes:boxes.map(b=>({...b})),player:{...player},moves});
+    box.r=br;box.c=bc;box.onTarget=grid[br][bc].target;
+    player.r=nr;player.c=nc;moves++;
+  }else{
+    history.push({boxes:boxes.map(b=>({...b})),player:{...player},moves});
+    player.r=nr;player.c=nc;moves++;
+  }
+  updateMoves();render();checkWin();
+}
+
+function undo(){
+  if(!history.length)return;
+  const s=history.pop();
+  boxes=s.boxes;player=s.player;moves=s.moves;solved=false;
+  document.getElementById('msg').classList.remove('show');
+  updateMoves();render();
+}
+
+function checkWin(){
+  if(!boxes.every(b=>b.onTarget))return;
+  solved=true;
+  const msg=document.getElementById('msg');
+  const isLast=levelIdx===LEVELS.length-1;
+  document.getElementById('msgTitle').textContent='✓ 过关！';
+  document.getElementById('msgBody').textContent=isLast?'恭喜通关！':'用了 '+moves+' 步，进入下一关？';
+  document.getElementById('msgBtn').textContent=isLast?'重新开始':'下一关';
+  document.getElementById('msgBtn').onclick=()=>{msg.classList.remove('show');if(isLast){levelIdx=0;loadLevel(0);}else nextLevel();};
+  msg.classList.add('show');
+}
+
+function nextLevel(){if(levelIdx<LEVELS.length-1){levelIdx++;loadLevel(levelIdx);}}
+function prevLevel(){if(levelIdx>0){levelIdx--;loadLevel(levelIdx);}}
+function resetLevel(){loadLevel(levelIdx);}
+function updateMoves(){document.getElementById('moves').textContent=moves;}
+
+function render(){
+  const rows=grid.length,cols=grid[0].length,w=cols*CELL,h=rows*CELL;
+  if(cx.width!==w||cx.height!==h){cx.width=w;cx.height=h;}
+  ctx.clearRect(0,0,w,h);
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const g=grid[r][c],x=c*CELL,y=r*CELL;
+    const isBox=boxes.find(b=>b.r===r&&b.c===c);
+    const isPlayer=player.r===r&&player.c===c;
+    ctx.fillStyle='#fff';ctx.fillRect(x,y,CELL,CELL);
+    if(g.wall){
+      ctx.fillStyle='#000';ctx.fillRect(x+1,y+1,CELL-2,CELL-2);continue;
+    }
+    if(g.target){
+      ctx.strokeStyle='#000';ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(x+CELL/2,y+CELL/2,6,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(x+CELL/2,y+CELL/2,2,0,Math.PI*2);
+      ctx.fillStyle='#000';ctx.fill();
+    }
+    if(isBox){
+      const bx=x+4,by=y+4,bw=CELL-8;
+      ctx.strokeStyle='#000';ctx.lineWidth=2;ctx.strokeRect(bx,by,bw,bw);
+      if(isBox.onTarget){ctx.fillStyle='#000';ctx.fillRect(bx,by,bw,bw);}
+      ctx.strokeStyle=isBox.onTarget?'#fff':'#000';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx+bw,by+bw);
+      ctx.moveTo(bx+bw,by);ctx.lineTo(bx,by+bw);ctx.stroke();
+    }
+    if(isPlayer){
+      ctx.fillStyle='#000';
+      ctx.beginPath();ctx.arc(x+CELL/2,y+CELL/2-4,8,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.moveTo(x+CELL/2,y+CELL/2+18);
+      ctx.lineTo(x+CELL/2-12,y+CELL/2-4);ctx.lineTo(x+CELL/2+12,y+CELL/2-4);
+      ctx.closePath();ctx.fill();
+    }
+    ctx.strokeStyle='#eee';ctx.lineWidth=0.5;ctx.strokeRect(x,y,CELL,CELL);
+  }
+}
+
+// fit canvas
+function fitCanvas(){
+  const wrap=document.querySelector('.board-wrap');
+  if(!wrap)return;
+  const maxW=wrap.clientWidth-4;
+  const cols=grid[0]?grid[0].length:10,rows=grid.length||10,natW=cols*CELL;
+  if(natW>maxW){const s=maxW/natW;cx.style.width=Math.floor(natW*s)+'px';cx.style.height=Math.floor(rows*CELL*s)+'px';}
+  else{cx.style.width='';cx.style.height='';}
+}
+new ResizeObserver(fitCanvas).observe(document.querySelector('.board-wrap'));
+
+// events
+document.addEventListener('keydown',e=>{
+  const m={ArrowUp:'u',ArrowDown:'d',ArrowLeft:'l',ArrowRight:'r',w:'u',s:'d',a:'l',d:'r',W:'u',S:'d',A:'l',D:'r'};
+  const dir=m[e.key];if(!dir)return;e.preventDefault();
+  const [dr,dc]=DIRS[dir];tryMove(dr,dc);
+});
+document.getElementById('dpad').addEventListener('click',e=>{
+  const btn=e.target.closest('[data-d]');if(!btn)return;
+  const [dr,dc]=DIRS[btn.dataset.d];tryMove(dr,dc);
+});
+let touchStart=null;
+cx.addEventListener('touchstart',e=>{const t=e.touches[0];touchStart={x:t.clientX,y:t.clientY};},{passive:true});
+cx.addEventListener('touchend',e=>{
+  if(!touchStart)return;const t=e.changedTouches[0];
+  const dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;touchStart=null;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<15)return;
+  const dir=Math.abs(dx)>Math.abs(dy)?dx>0?'r':'l':dy>0?'d':'u';
+  const [dr,dc]=DIRS[dir];tryMove(dr,dc);
+},{passive:true});
+document.getElementById('resetBtn').addEventListener('click',resetLevel);
+document.getElementById('undoBtn').addEventListener('click',undo);
+document.getElementById('prevBtn').addEventListener('click',prevLevel);
+document.getElementById('nextBtn').addEventListener('click',nextLevel);
+
+loadLevel(0);
+</script>
+</body>
+</html>
