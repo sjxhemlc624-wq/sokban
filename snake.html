@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Snake · 贪吃蛇</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#0a0a1a;color:#eee;font-family:-apple-system,'Segoe UI',sans-serif;
+  min-height:100dvh;display:flex;justify-content:center;align-items:center;
+  overflow:hidden;user-select:none;-webkit-user-select:none
+}
+.game{
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  padding:20px;width:100%;max-width:500px
+}
+h1{
+  font-size:24px;font-weight:800;letter-spacing:4px;
+  background:linear-gradient(135deg,#f7971e,#ffd200);-webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;text-shadow:none
+}
+.hud{
+  display:flex;justify-content:space-between;align-items:center;width:100%;
+  font-size:14px;font-weight:600;color:#888
+}
+.hud b{color:#eee;font-size:18px}
+.score-pop{color:#f7971e;font-size:14px;transition:opacity .3s;opacity:0}
+.board-wrap{
+  position:relative;width:100%;display:flex;justify-content:center;border-radius:12px;
+  box-shadow:0 0 40px rgba(247,151,30,.12),0 0 80px rgba(255,210,0,.06)
+}
+canvas{
+  display:block;border-radius:12px;background:#0f0f2a;
+  touch-action:none;max-width:100%;height:auto;border:1px solid rgba(255,255,255,.06)
+}
+.controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:2px}
+.controls button{
+  background:rgba(255,255,255,.07);color:#ccc;border:1px solid rgba(255,255,255,.12);
+  font-size:13px;font-weight:600;padding:8px 18px;border-radius:8px;
+  cursor:pointer;transition:.15s;backdrop-filter:blur(4px)
+}
+.controls button:hover{background:rgba(255,255,255,.14);color:#fff}
+.controls button:active{transform:scale(.95)}
+.dpad{
+  display:grid;grid-template:repeat(3,54px)/repeat(3,54px);gap:4px;margin-top:6px
+}
+.dpad button{
+  background:rgba(255,255,255,.06);color:#aaa;border:1px solid rgba(255,255,255,.08);
+  font-size:22px;border-radius:10px;cursor:pointer;transition:.12s;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;backdrop-filter:blur(4px)
+}
+.dpad button:active{background:rgba(247,151,30,.25);color:#f7971e;border-color:#f7971e40}
+.dpad .empty{visibility:hidden;border-color:transparent;background:transparent}
+.overlay{
+  position:absolute;inset:0;border-radius:12px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  background:rgba(10,10,26,.88);backdrop-filter:blur(6px);
+  opacity:0;pointer-events:none;transition:opacity .4s
+}
+.overlay.show{opacity:1;pointer-events:auto}
+.overlay h2{font-size:30px;font-weight:900;margin-bottom:4px;letter-spacing:2px}
+.overlay .sub{font-size:14px;color:#888;margin-bottom:16px}
+.overlay button{
+  background:linear-gradient(135deg,#f7971e,#ffd200);color:#0a0a1a;border:none;
+  font-size:15px;font-weight:800;padding:11px 32px;border-radius:10px;cursor:pointer;
+  transition:.15s;letter-spacing:.5px
+}
+.overlay button:hover{transform:scale(1.04);box-shadow:0 0 20px rgba(247,151,30,.3)}
+.footer{font-size:11px;color:#555;letter-spacing:1px;margin-top:2px}
+.best{color:#555}
+@media(max-width:420px){
+  h1{font-size:20px}
+  .hud{font-size:12px}
+  .hud b{font-size:16px}
+}
+</style>
+</head>
+<body>
+<div class="game">
+  <h1>贪 吃 蛇</h1>
+  <div class="hud">
+    <span>长度 <b id="score">0</b></span>
+    <span class="best">最高 <b id="best">0</b></span>
+    <span class="score-pop" id="pop">+1</span>
+  </div>
+  <div class="board-wrap">
+    <canvas id="c"></canvas>
+    <div class="overlay" id="overlay">
+      <h2 id="ot">Game Over</h2>
+      <p class="sub" id="os">得分 0</p>
+      <button id="ob">重新开始</button>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="pauseBtn">⏸ 暂停</button>
+    <button id="resetBtn">↺ 重来</button>
+  </div>
+  <div class="dpad" id="dpad">
+    <button class="empty"></button><button data-d="u">▲</button><button class="empty"></button>
+    <button data-d="l">◀</button><button class="empty"></button><button data-d="r">▶</button>
+    <button class="empty"></button><button data-d="d">▼</button><button class="empty"></button>
+  </div>
+  <div class="footer">↑↓←→ 或 WASD 移动  ·  空格暂停</div>
+</div>
+<script>
+const CELL=24,GAP=1;
+const cx=document.getElementById('c'),ctx=cx.getContext('2d');
+const COLS=Math.floor((Math.min(window.innerWidth-40,500)-2)/CELL)-1;
+const ROWS=COLS;
+const W=COLS*CELL,H=ROWS*CELL;
+cx.width=W;cx.height=H;
+const LS_KEY='snake_best';
+
+let snake,dir,nextDir,food,score,best,paused,gameOver,loop;
+let pendingGrow=0,frameCount=0;
+
+best=parseInt(localStorage.getItem(LS_KEY))||0;
+document.getElementById('best').textContent=best;
+
+function init(){
+  const mid=Math.floor(COLS/2);
+  snake=[{x:mid,y:mid},{x:mid-1,y:mid},{x:mid-2,y:mid}];
+  dir={x:1,y:0};nextDir={x:1,y:0};
+  score=0;paused=false;gameOver=false;pendingGrow=0;frameCount=0;
+  spawnFood();
+  document.getElementById('score').textContent=0;
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('pauseBtn').textContent='⏸ 暂停';
+  if(loop)clearInterval(loop);
+  loop=setInterval(tick,120);
+  render();
+}
+
+function spawnFood(){
+  const occupied=new Set(snake.map(s=>`${s.x},${s.y}`));
+  const free=[];
+  for(let x=1;x<COLS-1;x++)for(let y=1;y<ROWS-1;y++)
+    if(!occupied.has(`${x},${y}`))free.push({x,y});
+  if(!free.length)return;
+  food=free[Math.floor(Math.random()*free.length)];
+  // food pulse phase
+  food.phase=Math.random()*Math.PI*2;
+}
+
+function tick(){
+  if(paused||gameOver)return;
+  frameCount++;
+  dir={...nextDir};
+  const head=snake[0];
+  const nx=head.x+dir.x,ny=head.y+dir.y;
+  // wall collision
+  if(nx<0||nx>=COLS||ny<0||ny>=ROWS){gameOver();return;}
+  // self collision
+  for(const s of snake)if(s.x===nx&&s.y===ny){gameOver();return;}
+  // move
+  snake.unshift({x:nx,y:ny});
+  if(nx===food.x&&ny===food.y){
+    score++;pendingGrow++;
+    document.getElementById('score').textContent=score;
+    showPop();
+    spawnFood();
+  }
+  if(pendingGrow>0)pendingGrow--;
+  else snake.pop();
+  render();
+}
+
+function gameOver(){
+  gameOver=true;clearInterval(loop);
+  const ov=document.getElementById('overlay');
+  document.getElementById('ot').textContent='💀 Game Over';
+  document.getElementById('os').textContent='得分 '+score;
+  if(score>best){best=score;localStorage.setItem(LS_KEY,best);document.getElementById('best').textContent=best;document.getElementById('os').textContent='🎉 新纪录！得分 '+score;}
+  document.getElementById('ob').textContent='再来一局';
+  document.getElementById('ob').onclick=()=>{ov.classList.remove('show');init();};
+  ov.classList.add('show');
+}
+
+function showPop(){
+  const el=document.getElementById('pop');
+  el.style.opacity='1';
+  setTimeout(()=>el.style.opacity='0',400);
+}
+
+// ── HSL palette for snake segments ──
+function snakeColor(i,total){
+  const hue=180+(i/total)*240; // teal→yellow→pink
+  const sat=85-i*2;
+  const lit=55+Math.sin(i*0.3)*8;
+  return `hsl(${hue},${Math.max(60,sat)}%,${Math.round(lit)}%)`;
+}
+
+function render(){
+  ctx.clearRect(0,0,W,H);
+  // subtle grid
+  ctx.fillStyle='rgba(255,255,255,.02)';
+  for(let x=0;x<COLS;x++)for(let y=0;y<ROWS;y++)
+    if((x+y)%2===0)ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+
+  // food
+  if(food){
+    const fx=food.x*CELL+CELL/2,fy=food.y*CELL+CELL/2;
+    const pulse=Math.sin(frameCount*0.08+food.phase)*.15+.85;
+    const r=CELL*.35*pulse;
+    const grad=ctx.createRadialGradient(fx-r*.3,fy-r*.3,2,fx,fy,r);
+    grad.addColorStop(0,'#fff');
+    grad.addColorStop(.3,'#ff6b6b');
+    grad.addColorStop(.7,'#ee5a24');
+    grad.addColorStop(1,'rgba(238,90,36,0)');
+    ctx.beginPath();
+    ctx.arc(fx,fy,r,0,Math.PI*2);
+    ctx.fillStyle=grad;
+    ctx.fill();
+    // glow
+    ctx.shadowColor='#ff6b6b';
+    ctx.shadowBlur=12;
+    ctx.beginPath();
+    ctx.arc(fx,fy,r*.6,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,107,107,.3)';
+    ctx.fill();
+    ctx.shadowBlur=0;
+  }
+
+  // snake
+  const len=snake.length;
+  for(let i=len-1;i>=0;i--){
+    const s=snake[i],x=s.x*CELL+GAP,y=s.y*CELL+GAP;
+    const size=CELL-GAP*2;
+    const col=snakeColor(i,len);
+    // body
+    const rad=4;
+    ctx.beginPath();
+    ctx.roundRect(x,y,size,size,rad);
+    ctx.fillStyle=col;
+    ctx.fill();
+    // inner highlight
+    const hcol=snakeColor(i,len).replace('hsl','hsla').replace(')',',.25)');
+    ctx.beginPath();
+    ctx.roundRect(x+2,y+2,size-4,size-4,rad-1);
+    ctx.fillStyle='rgba(255,255,255,.12)';
+    ctx.fill();
+    // glow on head
+    if(i===0){
+      ctx.shadowColor=col;
+      ctx.shadowBlur=14;
+      ctx.beginPath();
+      ctx.roundRect(x,y,size,size,rad);
+      ctx.fillStyle='rgba(255,255,255,0)';
+      ctx.fill();
+      ctx.shadowBlur=0;
+      // eyes
+      const ex=x+size/2,ey=y+size/2;
+      const ed=5;
+      ctx.fillStyle='#fff';
+      ctx.beginPath();
+      ctx.arc(ex-ed,ey-ed,3,0,Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(ex+ed,ey-ed,3,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle='#0a0a1a';
+      ctx.beginPath();
+      ctx.arc(ex-ed+dir.x*1.2,ey-ed+dir.y*1.2,1.5,0,Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(ex+ed+dir.x*1.2,ey-ed+dir.y*1.2,1.5,0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // border
+  ctx.strokeStyle='rgba(255,255,255,.06)';
+  ctx.lineWidth=1;
+  ctx.strokeRect(0,0,W,H);
+}
+
+// roundRect polyfill
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+    if(r>w/2)r=w/2;if(r>h/2)r=h/2;
+    this.moveTo(x+r,y);this.lineTo(x+w-r,y);
+    this.quadraticCurveTo(x+w,y,x+w,y+r);
+    this.lineTo(x+w,y+h-r);
+    this.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+    this.lineTo(x+r,y+h);
+    this.quadraticCurveTo(x,y+h,x,y+h-r);
+    this.lineTo(x,y+r);
+    this.quadraticCurveTo(x,y,x+r,y);
+    this.closePath();
+    return this;
+  };
+}
+
+// ── controls ──
+document.addEventListener('keydown',e=>{
+  if(e.key===' '||e.key==='Space'){
+    e.preventDefault();
+    if(!gameOver){paused=!paused;document.getElementById('pauseBtn').textContent=paused?'▶ 继续':'⏸ 暂停';}
+    return;
+  }
+  if(gameOver&&e.key==='Enter'){document.getElementById('ob').click();return;}
+  const m={
+    ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0},
+    w:{x:0,y:-1},s:{x:0,y:1},a:{x:-1,y:0},d:{x:1,y:0},
+    W:{x:0,y:-1},S:{x:0,y:1},A:{x:-1,y:0},D:{x:1,y:0}
+  };
+  const nd=m[e.key];
+  if(!nd)return;
+  e.preventDefault();
+  if(nd.x+dir.x!==0||nd.y+dir.y!==0)nextDir=nd;
+});
+
+document.getElementById('dpad').addEventListener('click',e=>{
+  const btn=e.target.closest('[data-d]');if(!btn)return;
+  const m={u:{x:0,y:-1},d:{x:0,y:1},l:{x:-1,y:0},r:{x:1,y:0}};
+  const nd=m[btn.dataset.d];
+  if(nd.x+dir.x!==0||nd.y+dir.y!==0)nextDir=nd;
+});
+
+let ts=null;
+cx.addEventListener('touchstart',e=>{const t=e.touches[0];ts={x:t.clientX,y:t.clientY};},{passive:true});
+cx.addEventListener('touchend',e=>{
+  if(!ts)return;const t=e.changedTouches[0];
+  const dx=t.clientX-ts.x,dy=t.clientY-ts.y;ts=null;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<15)return;
+  const ax=Math.abs(dx),ay=Math.abs(dy);
+  const nd=ax>ay?(dx>0?{x:1,y:0}:{x:-1,y:0}):(dy>0?{x:0,y:1}:{x:0,y:-1});
+  if(nd.x+dir.x!==0||nd.y+dir.y!==0)nextDir=nd;
+},{passive:true});
+
+document.getElementById('pauseBtn').addEventListener('click',()=>{
+  if(gameOver)return;
+  paused=!paused;document.getElementById('pauseBtn').textContent=paused?'▶ 继续':'⏸ 暂停';
+});
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  clearInterval(loop);init();
+});
+
+// fit canvas
+function fitCanvas(){
+  const wrap=document.querySelector('.board-wrap');
+  if(!wrap)return;
+  const maxW=wrap.clientWidth-2;
+  if(W>maxW){const s=maxW/W;cx.style.width=Math.floor(W*s)+'px';cx.style.height=Math.floor(H*s)+'px';}
+  else{cx.style.width='';cx.style.height='';}
+}
+new ResizeObserver(()=>{requestAnimationFrame(fitCanvas)}).observe(document.querySelector('.board-wrap'));
+
+init();
+</script>
+</body>
+</html>
